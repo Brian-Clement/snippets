@@ -1,0 +1,4 @@
+name = RB Body Image
+description = Insert legacy images into the body.
+package = RB
+core = 7.x

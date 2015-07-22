@@ -1,0 +1,86 @@
+<?php
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function rb_body_image_theme_registry_alter(&$theme_registry) {
+  $theme_registry['field']['theme path'] = drupal_get_path('module', 'rb_body_image');
+  $theme_registry['field']['function'] = 'rb_body_image_theme_field';
+}
+
+/**
+ * Implements hook_theme_field().
+ */
+function rb_body_image_theme_field($variables) {
+  $output = '';
+	if ($variables['element']['#field_name'] == 'body') {
+  		// Get the necessary field values for new image, legacy image, and hide image fields.
+  		$object = $variables['element']['#object'];
+  		$nodeType = $object->type;
+  		$body = $object->body['und'][0]['value'];
+  		if (isset($object->field_op_main_image['und'][0]['uri'])) {
+  			$legacyImage = $object->field_op_main_image['und'][0]['uri'];
+  		}  		
+  		if (isset($object->field_image_large['und'][0]['uri'])) {
+  			$newImage = $object->field_image_large['und'][0]['uri'];
+  		}
+  		$hideImage = 0;
+  		if (isset($object->field_op_main_image_display['und'][0]['value'])) {
+  			$hideImage = $object->field_op_main_image_display['und'][0]['value'];
+  		}
+
+		// Render the label, if it's not hidden.
+		if (!$variables['label_hidden']) {
+			$output .= '<div class="field-label"' . $variables['title_attributes'] . '>' . $variables['label'] . ':&nbsp;</div>';
+		}
+
+		// Render the items.
+		$output .= '<div class="field-items"' . $variables['content_attributes'] . '>';
+		foreach ($variables['items'] as $delta => $item) {
+			$classes = 'field-item ' . ($delta % 2 ? 'odd' : 'even');
+			$output .= '<div class="' . $classes . '"' . $variables['item_attributes'][$delta] . '>' . drupal_render($item) . '</div>';
+		}
+
+		$output .= '</div>';
+
+		// Rewrite Body Output for Legacy Image Insert
+		if ($nodeType == 'openpublish_article' && empty($newImage) && !empty($legacyImage) && $hideImage < 1) {
+  			// Split at first </p> tag to insert legacy image
+			$splitTag = '</p>';
+			$output = explode($splitTag, $output, 2);
+			$newOutput = array();
+			$newOutput = $output[0].$splitTag;
+			$newOutput .= '<div class="body-legacy-image">';
+			$newOutput .= theme('image', array('path' => $legacyImage));
+			$newOutput .= '</div>';
+			$newOutput .= $output[1];
+  		}
+  		else {
+  			$newOutput = $output;
+  		}
+
+		// Render the top-level DIV.
+		$output = '<div class="' . $variables['classes'] . '"' . $variables['attributes'] . '>' . $newOutput . '</div>';
+
+		// FINAL OUTPUT
+		return $output;
+	}
+  else {
+	// Render the label, if it's not hidden.
+	if (!$variables['label_hidden']) {
+		$output .= '<div class="field-label"' . $variables['title_attributes'] . '>' . $variables['label'] . ':&nbsp;</div>';
+	}
+
+	// Render the items.
+	$output .= '<div class="field-items"' . $variables['content_attributes'] . '>';
+	foreach ($variables['items'] as $delta => $item) {
+		$classes = 'field-item ' . ($delta % 2 ? 'odd' : 'even');
+		$output .= '<div class="' . $classes . '"' . $variables['item_attributes'][$delta] . '>' . drupal_render($item) . '</div>';
+	}
+	$output .= '</div>';
+
+	// Render the top-level DIV.
+	$output = '<div class="' . $variables['classes'] . '"' . $variables['attributes'] . '>' . $output . '</div>';
+
+	return $output;
+  };
+}
