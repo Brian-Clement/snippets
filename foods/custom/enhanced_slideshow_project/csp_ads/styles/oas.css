@@ -1,0 +1,29 @@
+/* Hide ads by default */
+.oas-desktop, .oas-mobile {
+  display: none;
+  clear: both;
+}
+
+/* Hide desktop ads on mobile devices */
+.mobile-ads .oas-desktop {
+  display: none;
+}
+.mobile-ads .oas-mobile {
+  display: block;
+  text-align: center;
+}
+
+/* Hide mobile ads on desktop/regular mode */
+.desktop-ads .oas-mobile {
+  display: none;
+}
+.desktop-ads .oas-desktop {
+  display: block;
+}
+
+.front.desktop-ads .oas-mobile,
+.front.desktop-ads .oas-desktop,
+.front.mobile-ads .oas-mobile,
+.front.mobile-ads .oas-desktop {
+  display: block;
+}

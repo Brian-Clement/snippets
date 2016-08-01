@@ -1,0 +1,286 @@
+<?php
+
+/**
+ * Implements hook_permission().
+ */
+function csp_ads_permission() {
+  return array(
+    'administer ads' => array(
+      'title' => t('Administer Ads'),
+      'description' => t('Manage OAS based advertisement blocks.'),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function csp_ads_menu() {
+  $items['admin/structure/ads'] = array(
+    'title' => 'Ads',
+    'description' => 'Manage OAS based advertisement blocks.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('csp_ads_settings'),
+    'access arguments' => array('administer ads'),
+    'file' => 'includes/admin.inc',
+  );
+  return $items;
+}
+
+/**
+ * Utility function to convert strings with newlines into arrays.
+ *
+ * @param $string
+ *   String containing a value on each newline.
+ * @param $break
+ *   Boolean value indicating if the string should be broken.
+ * @return
+ *   Array of items found in the string broken by newline.
+ */
+function _csp_ads_process_var($string, $break = FALSE) {
+  $array = explode("\n", trim($string));
+
+  foreach ($array as $key => $value) {
+    $array[$key] = trim($value);
+    if ($break) {
+      $value = explode('|', $value);
+      if(count($value)>1) {
+        $array[$value[0]] = trim($value[1]);
+      }
+      unset($array[$key]);
+    }
+  }
+  return $array;
+}
+
+/**
+ * Implements hook_block_info().
+ * Create a block instance for each OAS ad position defined.
+ */
+function csp_ads_block_info() {
+  $blocks = array();
+  
+  // Grab all the defined OAS positions for desktop/mobile.
+  $desktop = _csp_ads_process_var(variable_get('csp_ads_desktop', ''));
+  $mobile = _csp_ads_process_var(variable_get('csp_ads_mobile', ''));
+  $tablet = _csp_ads_process_var(variable_get('csp_ads_tablet', "x19\nx39"));
+  
+  // Loop through each OAS position and define a block.
+  foreach ($desktop as $position) {
+    $blocks['oas_desktop_'. $position] = array(
+      'info' => t('Desktop: OAS Position !pos', array('!pos' => $position)),
+    );
+  }
+  foreach ($mobile as $position) {
+    $blocks['oas_mobile_'. $position] = array(
+      'info' => t('Mobile: OAS Position !pos', array('!pos' => $position)),
+    );
+  }
+  foreach ($tablet as $position) {
+    $blocks['oas_tablet_'. $position] = array(
+      'info' => t('Tablet: OAS Position !pos', array('!pos' => $position)),
+    );
+  }
+
+  // Set up x13 JX Block
+  $blocks['jx_x13'] = array(
+    // The name that will appear in the block list.
+    'info' => t('Desktop: OAS Position x13 JX'),
+  );
+  
+  return $blocks;
+}
+
+/**
+ * Implements hook_block_configure().
+ * Allow for a label to be set underneath the ad.
+ */
+function csp_ads_block_configure($delta = '') {
+  $form[$delta .'_label'] = array(
+    '#type' => 'textfield',
+    '#title' => t('(Optional) Ad label'),
+    '#description' => t('Define a custom label to appear underneath the advertisement image.'),
+    '#default_value' => variable_get($delta .'_label', ''),
+  );
+  return $form;
+}
+
+/**
+ * Implements hook_block_save().
+ * Saves the custom ad label for each OAS position block.
+ */
+function csp_ads_block_save($delta = '', $edit = array()) {
+  variable_set($delta .'_label', $edit[$delta .'_label']);
+}
+
+/**
+ * Implements hook_block_view().
+ * Produces the markup for each OAS ad position unit.
+ */
+function csp_ads_block_view($delta = '') {
+  require_once(drupal_get_path('module', 'csp_ads') .'/includes/blocks.inc');
+  if ($delta == 'jx_x13') {
+    $blockContent = variable_get('csp_ads_x13_jx', '');
+        if (!empty($blockContent)) {
+          $block['content'] = check_markup($blockContent['value'], $blockContent['format'], '', TRUE);
+        }
+  } else {
+    $block = array(
+      'content' => csp_ads_block_process($delta),
+    );
+  }  
+  return $block;
+}
+
+/**
+ * Implements template_preprocess_html().
+ * Adds OAS positions as Drupal JS setting.
+ */
+function csp_ads_preprocess_html(&$vars) {
+  global $oas_enabled;
+  if (!is_array($oas_enabled)) {
+    $oas_enabled = array();
+  }
+  
+  // TODO: Come up with method to order positions in JS inclusion.
+  // TEMPORARY: Make sure x13 call is always first and loaded.
+  if (!isset($oas_enabled['desktop'])) {
+    $oas_enabled['desktop'] = array();
+  }
+  $oas_enabled['desktop'] = array_merge(array(0 => 'x13'), $oas_enabled['desktop']);
+  
+  // Pass along positions to Drupal JS.
+  drupal_add_js(array('oas' => $oas_enabled), 'setting');
+  
+  // Get the sizes for DX scripts
+  $dxsizes = _csp_ads_process_var(variable_get('csp_ads_sizes', ''));
+
+  if (isset($dxsizes)) {
+    // Set up ad positions as keys
+    foreach ($dxsizes as $value) {
+      list($pos, $size) = explode(':', $value); 
+      $sizes[$pos] = $size;
+    }
+    
+    $setSizes = array();
+    if (isset($oas_enabled['desktop'])) {
+      // Find enabled desktop ad units, match them to their declared sizes
+      foreach ($oas_enabled['desktop'] as $desktopPos) {
+        if (in_array($desktopPos, array_keys($sizes))) {
+          $setSizes['desktop'][] = $sizes[$desktopPos];
+          // Create output for Drupal JS
+          $finalSizes['desktop'] = implode(' ', $setSizes['desktop']);
+        }
+      }
+      
+    }
+    if (isset($oas_enabled['mobile'])) {
+      // Find enabled mobile ad units, match them to their declared sizes
+      foreach ($oas_enabled['mobile'] as $mobilePos) {
+        if (in_array($mobilePos, array_keys($sizes))) {
+          $setSizes['mobile'][] = $sizes[$mobilePos];
+          // Create output for Drupal JS
+          $finalSizes['mobile'] = implode(' ', $setSizes['mobile']);
+        }        
+      }      
+    }
+    if (isset($finalSizes)) {
+      // Pass size declarations to Drupal JS
+      drupal_add_js(array('oasdx' => $finalSizes), 'setting');
+    }
+  }
+}
+
+/**
+ * Implements template_process_html().
+ * Adds OAS setup scripts to the themes head section.
+ */
+function csp_ads_process_html(&$vars) {
+  $scripts = variable_get('csp_ads_scripts', '');
+  $dxscripts = variable_get('csp_ads_dx_scripts', '');
+  
+  // Define what the current page URL is.
+  $page_path = drupal_get_path_alias($_GET['q']);
+  $page_url = str_replace(array('http://','https://'), '', url('', array('absolute' => TRUE)));
+  
+  // Check if we should use the devurl for testing.
+  $devurl = variable_get('csp_ads_devurl', '');
+  if (!empty($devurl)) {
+    $page_url = trim($devurl, '/') .'/';
+  }
+  
+  // Check if we are on the frontpage.
+  if (drupal_is_front_page()) {
+    $page_path = '<front>';
+  }
+  
+  // Check if there is an existing path map.
+  $path_map = _csp_ads_process_var(variable_get('csp_ads_paths', ''), TRUE);
+  if (isset($path_map[$page_path])) {
+    $page_path = $path_map[$page_path];
+  }
+  
+  // Replace !page with the current page URL.
+  $scripts = str_replace('!page', $page_url . str_replace('<front>', '', $page_path), $scripts);
+  $dxscripts = str_replace('!page', $page_url . str_replace('<front>', '', $page_path), $dxscripts);
+
+  if (in_array('node-type-enhanced-slideshow', $vars['classes_array'])) {
+    $vars['scripts'] .= $dxscripts;
+  } else {
+    $vars['scripts'] .= $scripts;
+  }
+}
+
+/**
+ * Implements template_process_block().
+ * Adds mobile/desktop identifying class to each ad block.
+ */
+function csp_ads_preprocess_block(&$vars) {
+  if (preg_match('/oas_([a-z]+)_([a-z0-9]+)/i', $vars['block']->delta, $matches)) {
+    $vars['classes_array'][] = 'oas-'. $matches[1];
+  }
+}
+
+
+function csp_ad_placements_primary() {
+  if(drupal_is_front_page()) {
+    return false;
+  }
+  
+  $arg1 = arg(1);
+  if(!empty($arg1)) {
+    $node_load = node_load($arg1);
+
+    if(!empty($node_load)
+      && isset($node_load->field_article_type) 
+      && isset($node_load->field_article_type[LANGUAGE_NONE])
+      && $node_load->field_article_type[LANGUAGE_NONE][0]['value'] === 'featured_article') 
+    {
+     return false;
+    }
+    else {
+     return true;
+    }
+  }
+  else {
+    return true;
+  }
+}
+function csp_ad_placements_featured() {
+  $arg1 = arg(1);
+  if(!empty($arg1)) {
+
+    $node_load = node_load(arg(1));
+
+    if(!empty($node_load) 
+      && isset($node_load->field_article_type) 
+      && isset($node_load->field_article_type[LANGUAGE_NONE])
+      && $node_load->field_article_type[LANGUAGE_NONE][0]['value'] === 'featured_article') 
+    {
+     return true;
+    }
+    else {
+     return false;
+    }
+  }
+}
