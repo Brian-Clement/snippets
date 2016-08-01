@@ -1,0 +1,9 @@
+name = Gated Content
+description = "Select node types to show restricted view to unauthenticated users."
+core = 7.x
+dependencies[] = ds
+files[] = gated_content.module
+files[] = gated_content.install
+files[] = gated_content.admin.inc
+files[] = gated_content.test
+configure=admin/structure/content/gated_content/settings

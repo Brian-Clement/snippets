@@ -1,0 +1,66 @@
+<?php
+/**
+ * Implements hook_install()
+ */
+function gated_content_install() {
+	// if the gated content field does not exist then create it
+	if (!field_info_field('gated_content')) {
+		$field = array(
+			'field_name' => 'gated_content',
+			'type' => 'list_boolean',
+			'entity_types' => array('node'),
+			'settings'    => array(
+			  'allowed_values' => array(
+			    '',
+			    '',
+			  ),
+			),
+		);
+		$field = field_create_field($field);
+	}
+	// if the gated content field does not exist then create it
+	if (!field_info_field('gated_content_teaser')) {
+		$field = array(
+			'field_name' => 'gated_content_teaser',
+			'type' => 'text_long',
+			'entity_types' => array('node'),
+			'translatable' => TRUE,
+		);
+		$field = field_create_field($field);
+	}
+}
+
+/**
+ * Implements hook_uninstall()
+ * 
+ * Removes fields from node types.
+ */
+function gated_content_uninstall() {
+  watchdog('Gated Content Module', 'Uninstalling module and deleting fields');
+  $types = node_type_get_types();
+  foreach($types as $type) {
+    gated_content_delete_gated_content($type);
+  }
+  $field = field_info_field('gated_content');
+  if ($field) {
+    field_delete_field('gated_content', FALSE);
+  }
+  $field = field_info_field('gated_content_teaser');
+  if ($field) {
+    field_delete_field('gated_content_teaser', FALSE);
+  }
+}
+
+/**
+ * Custom function to delete fields.
+ */
+function gated_content_delete_gated_content($type) {
+  $instance = field_info_instance('node', 'gated_content', $type->type);
+  if ($instance) {
+    field_delete_instance($instance);
+  }
+  $instance = field_info_instance('node', 'gated_content_teaser', $type->type);
+  if ($instance) {
+    field_delete_instance($instance);
+  }
+}

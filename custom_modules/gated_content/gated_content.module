@@ -1,0 +1,151 @@
+<?php
+
+/**
+ * Implements hook_help().
+ *
+ * Displays help and module information.
+ *
+ * @param path 
+ *   Which path of the site we're using to display help
+ * @param arg 
+ *   Array that holds the current path as returned from arg() function
+ */
+function gated_content_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#gated_content":
+      return '<p>' . t("Show unknown users shortened teasers for specified nodes.") . '</p>';
+      break;
+  }
+} 
+
+/**
+ * Implements hook_block_info().
+ */
+function gated_content_block_info() {
+  $blocks['gated_content'] = array(
+    // The name that will appear in the block list.
+    'info' => t('Gated Content'),
+    // Default setting.
+    'cache' => DRUPAL_CACHE_PER_ROLE,
+  );
+  return $blocks;
+}
+
+/**
+ * @file
+ * Allows for customizing Display Suite
+ * view modes for unauthenticated users.
+ *
+ * Additionally allows cookie-based authentication
+ * for targeting known newsletter subscribers.
+ */
+
+/**
+ * Implementation of hook_menu().
+ */
+function gated_content_menu() {
+	$items['admin/structure/gated_content'] = array(
+		'title' => 'Gated Content',
+		'description' => 'Restrict content types to known users.',
+		'position' => 'right',
+		'page callback' => 'system_admin_menu_block_page',
+		'access arguments' => array('administer site configuration'),
+		'file' => 'system.admin.inc',
+		'file path' => drupal_get_path('module', 'system'),
+	);
+	$items['admin/structure/gated_content/settings'] = array(
+		'title' => 'Gated Content settings',
+		'description' => 'Configure Gated Content.',
+		'page callback' => 'drupal_get_form',
+		'page arguments' => array('gated_content_admin_settings'),
+		'access arguments' => array('administer site configuration'),
+		'type' => MENU_NORMAL_ITEM,
+		'file' => 'gated_content.admin.inc',
+	);
+	return $items;
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ *
+ * Create "Gated Teaser" view mode.
+ */
+function gated_content_entity_info_alter(&$info) {
+  // Add the 'Gated Content' view mode for nodes.
+  $info['node']['view modes'] += array(
+    'gated_content' => array(
+      'label' => t('Gated Content'),
+      'custom settings' => FALSE,
+    ),
+  );
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function gated_content_block_view($delta = '') {
+  switch ($delta) {
+    case 'gated_content':
+      $block['subject'] = t('Gated content call to action');
+      if (user_access('access content')) {
+      // Retrieve and process data here.
+        $blockContent = variable_get('gated_content_cta', '');
+        if (empty($blockContent)) {
+          $block['content'] = t('Configure your call to action');
+        }
+        else {
+          $block['content'] = check_markup($blockContent['value'], $blockContent['format'], '', TRUE);
+        }     
+      }
+    break;
+  }
+  return $block;
+}
+
+/**
+ * Implements hook_ds_fields_info().
+ */
+function gated_content_ds_fields_info($entity_type) {
+  $fields = array();
+
+  $fields['node']['gated_content_ds_cta'] = array(
+    'title' => t('Gated Content CTA'),
+    'field_type' => DS_FIELD_TYPE_BLOCK,
+    'ui_limit' => array('*|gated_content'),
+    'properties' => array(
+      'block' => 'gated_content|gated_content',
+      'block_render' => DS_BLOCK_CONTENT,
+    )
+  );
+
+  if (isset($fields[$entity_type])) {
+    return array($entity_type => $fields[$entity_type]);
+  }
+  return;
+} 
+
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function gated_content_theme_registry_alter(&$theme_registry) {
+  $theme_registry['field']['theme path'] = drupal_get_path('module', 'gated_content');
+  $theme_registry['field']['function'] = 'gated_content_theme_field';
+}
+
+/**
+ * Implements hook_entity_view_mode_alter().
+ */
+function gated_content_entity_view_mode_alter(&$view_mode, $context) {
+  if ($context['entity_type'] == 'node' && $view_mode == 'full') {
+  	$cookie = variable_get('gated_content_cookie', '');
+		$gatedTypes = variable_get('gated_content_node_types', '');
+		$thisType = $context['entity']->type;
+    if (isset($gatedTypes[$thisType]) && (is_string($gatedTypes[$thisType])) && (user_is_anonymous() && !isset($_COOKIE[$cookie]))) {
+      if (isset($context['entity']->gated_content['und'])) {
+      	if ($context['entity']->gated_content['und'][0]['value'] == 1) {
+	         $view_mode = 'gated_content';
+	      }
+      }      
+		}
+	} 
+}
