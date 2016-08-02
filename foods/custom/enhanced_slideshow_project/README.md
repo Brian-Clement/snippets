@@ -2,6 +2,8 @@
 
 ## Objective
 
+![](es-node.jpg)
+
 Create a slideshow content type that loads via ajax, sending a new pageview to Google Analytics and also reloads advertisements on page.
 
 ## Implementation
