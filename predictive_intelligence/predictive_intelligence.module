@@ -1,0 +1,266 @@
+<?php
+
+/**
+ * @file
+ * predictive_intelligence.module
+ */
+
+/**
+ * Implements hook_help().
+ *
+ * Displays help and module information.
+ *
+ * @param path
+ *   Which path of the site we're using to display help
+ * @param arg
+ *   Array that holds the current path as returned from arg() function
+ */
+function predictive_intelligence_help($path, $arg) {
+  switch ($path) {
+    case "admin/help#predictive_intelligence":
+      return '<p>' . t("Configure Predictive Intelligence tracking scripts") . '</p>';
+      break;
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function predictive_intelligence_permission() {
+  return array(
+    'administer predictive intelligence' => array(
+      'title' => t('Administer Predictive Intelligence'),
+      'description' => t('Manage Predictive Intelligence configuration.'),
+    ),
+  );
+}
+
+/**
+ * Implementation of hook_menu().
+ */
+function predictive_intelligence_menu() {
+  $items['admin/config/services/predictive_intelligence'] = array(
+    'title' => 'Predictive Intelligence Tracking',
+    'description' => 'Customize PI tracking variables.',
+    'position' => 'right',
+    'page callback' => 'system_admin_menu_block_page',
+    'access arguments' => array('administer site configuration'),
+    'file' => 'system.admin.inc',
+    'file path' => drupal_get_path('module', 'system'),
+  );
+  $items['admin/config/services/predictive_intelligence/settings'] = array(
+    'title' => 'Predictive Intelligence settings',
+    'description' => 'Configure Predictive Intelligence Tracking.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('predictive_intelligence_admin_settings'),
+    'access arguments' => array('administer site configuration'),
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'predictive_intelligence.admin.inc',
+  );
+  return $items;
+}
+
+/**
+* Implements hook_preprocess_html().
+*/
+function predictive_intelligence_preprocess_html(&$vars) {
+  global $base_url;
+  $domain = str_replace(array('http://', 'https://', 'www.'), '', $base_url);
+  $_collectJS = variable_get('predictive_intelligence_collect', '');
+  $_trackingDomain = variable_get('pi_tracking_domain', '');
+
+  // Run Collect.js and Streaming Updates when domain control is met (excludes admin pages)
+  if (isset($_trackingDomain) && ($_trackingDomain == $domain) && isset($_collectJS) && (!path_is_admin(current_path()))) {
+    drupal_add_js($_collectJS, array('scope' => 'header', 'type' => 'external'));
+    // Remaining PI tracking scripts
+    _pi_closing_scripts();
+  }
+}
+
+/**
+ * Implements hook_preprocess_page().
+ */
+function predictive_intelligence_preprocess_page(&$vars) {
+  // Do not process on admin pages.
+  if (!path_is_admin(current_path())) {
+    // Set global variables for Node case.
+    $pisection = variable_get('pi_section', '');
+    if (isset($vars['node']) && !empty($vars['node']->$pisection)) {
+      global $base_url;
+      if (!empty($pisection)) {
+        $taxtid = $vars['node']->$pisection;
+        $taxtid = end($taxtid['und']);
+        $taxtid = $taxtid['tid'];
+      }
+      $actualterm = taxonomy_term_load($taxtid);
+      $GLOBALS['PI_SECTION'] = variable_get('pi_item_preface', '') . '-' . predictive_intelligence_cleanup($actualterm->name);
+      $GLOBALS['PI_ITEM'] = variable_get('pi_item_preface', '') . '-' . $vars['node']->nid;
+      $GLOBALS['PI_TITLE'] = $vars['node']->title;
+      $GLOBALS['PI_PUBDATE'] = date('d/m/Y', $vars['node']->created);
+      $GLOBALS['PI_URL'] = $base_url . '/' . drupal_get_path_alias();
+      if (isset($vars['node']->field_image_large['und'])) {
+        $GLOBALS['PI_IMG'] = file_create_url($vars['node']->field_image_large['und'][0]['uri']);
+      }
+      elseif (isset($vars['node']->field_op_main_image['und'])) {
+        $GLOBALS['PI_IMG'] = file_create_url($vars['node']->field_op_main_image['und'][0]['uri']);
+      }
+      switch ($vars['node']->status) {
+        case 0:
+          $GLOBALS['PI_PUBSTATE'] = 'N';
+          $GLOBALS['PI_PUBDATE'] = '';
+          break;
+
+        default:
+          $GLOBALS['PI_PUBSTATE'] = 'Y';
+          break;
+      }
+      $GLOBALS['PI_DESC'] = (isset($vars['node']->field_article_summary['und']) ? $vars['node']->field_article_summary['und'][0]['safe_value'] : '');
+      $keyword_field = variable_get('pi_keywords', '');
+      $keyword_field = (isset($vars['node']->$keyword_field) ? $vars['node']->$keyword_field : '');
+      if (!empty($keyword_field['und'])) {
+        $keywords = array();
+        foreach ($keyword_field['und'] as $keyword) {
+          $keyword = taxonomy_term_load($keyword['tid']);
+          $keyword_name = str_replace("'", "", $keyword->name);
+          $keywords[] = $keyword_name;
+        }
+        $GLOBALS['PI_KEYWORDS'] = '"' . implode('", "', $keywords) . '"';
+      }
+      $GLOBALS['PI_CONTEXT'] = 'node';
+    }
+
+    // Set global variables for Search case.
+    if ($vars['theme_hook_suggestions'][0] == 'page__search') {
+      if (isset($vars['page']['#views_contextual_links_info']['views_ui']['view']->exposed_raw_input['search_api_views_fulltext'])) {
+        $GLOBALS['PI_SEARCHTERM'] = $vars['page']['#views_contextual_links_info']['views_ui']['view']->exposed_raw_input['search_api_views_fulltext'];
+      }
+      $GLOBALS['PI_CONTEXT'] = 'search';
+    }
+
+    // Set global variables for Section case.
+    $pi_term = variable_get('pi_section_term', '');
+    $term = menu_get_object('taxonomy_term', 2);
+    $pi_menu = variable_get('pi_section_menu', '');
+    $menu_trail = menu_get_active_trail();
+    $last_menu = end($menu_trail);
+
+    // If the term page we're on matches the vocabulary set in the form, we are on a Section page.
+    if (isset($term) && $term->vocabulary_machine_name == $pi_term) {
+      $GLOBALS['PI_SECTION'] = variable_get('pi_item_preface', '') . '-' . predictive_intelligence_cleanup($term->name);
+      $GLOBALS['PI_CONTEXT'] = 'section';
+    }
+    // If we are on a page in the specified Section menu, we are also on a Section page.
+    elseif (isset($menu_trail) && $pi_menu == $last_menu['menu_name']) {
+      $GLOBALS['PI_SECTION'] = variable_get('pi_item_preface', '') . '-' . predictive_intelligence_cleanup($last_menu['link_title']);
+      $GLOBALS['PI_CONTEXT'] = 'section';
+    }
+
+    // Set global variables for User.
+    if (isset($vars['user']) && !empty($vars['user']->mail)) {
+      $GLOBALS['PI_EMAIL'] = $vars['user']->mail;
+    }
+    else {
+      $GLOBALS['PI_EMAIL'] = '';
+    }
+
+    $global_keys = array('PI_SECTION', 'PI_KEYWORDS', 'PI_URL', 'PI_ITEM', 'PI_TITLE', 'PI_PUBDATE', 'PI_PUBSTATE', 'PI_DESC', 'PI_IMG');
+
+    foreach ($global_keys as $key) {
+      if (!isset($GLOBALS[$key])) {
+        $GLOBALS[$key] = '';
+      }
+    }
+  }
+}
+
+/**
+ * Remaining PI tracking scripts that will be placed in the site footer.
+ */
+function _pi_closing_scripts() {
+  // Predictive Intelligence
+  if (!isset($GLOBALS['PI_CONTEXT'])) {
+    $GLOBALS['PI_CONTEXT'] = '';
+  }
+  switch ($GLOBALS['PI_CONTEXT']) {
+    case 'node':
+      drupal_add_js('
+        _etmc.push(["setOrgId", "' . variable_get('predictive_intelligence_mid', '') . '"]);
+        _etmc.push(["setUserInfo", {"email" : "' . $GLOBALS['PI_EMAIL'] . '"}]);
+        _etmc.push(["trackPageView", {
+          "item" : "' . $GLOBALS['PI_ITEM'] . '",
+          "child_ids" : ["' . variable_get('predictive_intelligence_child_mid', '') . '"],
+        }]);
+        _etmc.push(["updateItem", {
+          "item" : "' . $GLOBALS['PI_ITEM'] . '",
+          "item_type" : "content",
+          "name" : "' . $GLOBALS['PI_TITLE'] . '",
+          "url" : "' . $GLOBALS['PI_URL'] . '",
+          "image_url" : "' . $GLOBALS['PI_IMG'] . '",
+          "available":"' . $GLOBALS['PI_PUBSTATE'] . '",
+          "release_date" : "' . $GLOBALS['PI_PUBDATE'] . '",
+          "description" : "' . $GLOBALS['PI_DESC'] . '",
+          "category" : "' . $GLOBALS['PI_SECTION'] . '",
+          "keywords" : [' . ($GLOBALS['PI_KEYWORDS']) . '],
+        } ]);
+        _etmc.push(["setOrgId", "' . variable_get('predictive_intelligence_child_mid', '') . '"]);
+        _etmc.push(["updateItem", {
+          "item" : "' . $GLOBALS['PI_ITEM'] . '",
+          "item_type" : "content",
+          "name" : "' . $GLOBALS['PI_TITLE'] . '",
+          "url" : "' . $GLOBALS['PI_URL'] . '",
+          "image_url" : "' . $GLOBALS['PI_IMG'] . '",
+          "available":"' . $GLOBALS['PI_PUBSTATE'] . '",
+          "release_date" : "' . $GLOBALS['PI_PUBDATE'] . '",
+          "description" : "' . $GLOBALS['PI_DESC'] . '",
+          "category" : "' . $GLOBALS['PI_SECTION'] . '",
+          "keywords" : [' . ($GLOBALS['PI_KEYWORDS']) . '],
+        } ]);
+        ', array('scope' => 'footer', 'type' => 'inline'));
+      break;
+
+    case 'search':
+      drupal_add_js('
+        _etmc.push(["setOrgId", "' . variable_get('predictive_intelligence_mid', '') . '"]);
+        _etmc.push(["setUserInfo", {"email" : "' . $GLOBALS['PI_EMAIL'] . '"}]);
+        _etmc.push(["trackPageView", {
+          "search" : "' . $GLOBALS['PI_SEARCHTERM'] . '",
+          "child_ids" : ["' . variable_get('predictive_intelligence_child_mid', '') . '"],
+        }]);
+        ', array('scope' => 'footer', 'type' => 'inline'));
+      break;
+
+    case 'section':
+    drupal_add_js('
+        _etmc.push(["setOrgId", "' . variable_get('predictive_intelligence_mid', '') . '"]);
+        _etmc.push(["setUserInfo", {"email" : "' . $GLOBALS['PI_EMAIL'] . '"}]);
+        _etmc.push(["trackPageView", {
+          "child_ids" : ["' . variable_get('predictive_intelligence_child_mid', '') . '"],
+          "category" : "' . $GLOBALS['PI_SECTION'] . '",
+        }]);
+        ', array('scope' => 'footer', 'type' => 'inline'));
+      break;
+
+    default:
+      drupal_add_js('
+        _etmc.push(["setOrgId", "' . variable_get('predictive_intelligence_mid', '') . '"]);
+        _etmc.push(["setUserInfo", {"email" : "' . $GLOBALS['PI_EMAIL'] . '"}]);
+        _etmc.push(["trackPageView", {
+          "child_ids" : ["' . variable_get('predictive_intelligence_child_mid', '') . '"],
+        }]);
+        ', array('scope' => 'footer', 'type' => 'inline'));
+      break;
+  }
+}
+
+
+/**
+ * Utility function to clean a term name.
+ *
+ * @param $string
+ *   The term name in which to strip down.
+ * @return
+ *   Cleaned version of the $string value.
+ */
+function predictive_intelligence_cleanup($string) {
+  return str_replace(array(' ', '--'), '-', strtolower(preg_replace('/[^A-Za-z0-9 ]/', '', $string)));
+}
